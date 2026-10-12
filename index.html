@@ -1,0 +1,367 @@
+```html
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Homestead & Yard Manager</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- Leaflet Draw Plugin -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+  
+  <!-- Turf.js for spatial area math -->
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Chart.js for egg tracking -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    /* Custom Map & UI Overrides */
+    .leaflet-container {
+      background-color: #0f172a !important;
+      font-family: inherit;
+    }
+    .leaflet-popup-content-wrapper {
+      background-color: #1e293b;
+      color: #f8fafc;
+      border-radius: 0.75rem;
+      border: 1px solid #334155;
+    }
+    .leaflet-popup-tip {
+      background-color: #1e293b;
+    }
+    /* Hide scrollbars for clean app look */
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans overflow-hidden antialiased select-none bg-slate-950">
+
+  <!-- Top App Bar -->
+  <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between shrink-0 z-30">
+    <div class="flex items-center space-x-2.5">
+      <div class="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+        <i data-lucide="sprout" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h1 class="font-bold text-base text-slate-100 leading-none">Homestead Manager</h1>
+        <p class="text-xs text-slate-400 mt-0.5">Yard, House & Poultry Care</p>
+      </div>
+    </div>
+    
+    <!-- Quick Weather Spray Indicator -->
+    <div class="flex items-center bg-slate-800/80 border border-slate-700/60 rounded-lg px-2.5 py-1 text-xs space-x-2">
+      <div class="flex items-center text-amber-400 space-x-1">
+        <i data-lucide="sun" class="w-3.5 h-3.5"></i>
+        <span>22°C</span>
+      </div>
+      <div class="h-3 w-[1px] bg-slate-700"></div>
+      <span class="text-emerald-400 font-medium flex items-center">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-pulse"></span>
+        Spray OK
+      </span>
+    </div>
+  </header>
+
+  <!-- Nightly Chook Coop Banner -->
+  <div id="coopBanner" class="bg-gradient-to-r from-amber-900/40 via-orange-900/30 to-slate-900 border-b border-amber-500/30 px-4 py-2.5 flex items-center justify-between text-xs shrink-0 transition-all duration-300">
+    <div class="flex items-center space-x-2.5">
+      <div class="p-1.5 bg-amber-500/20 text-amber-400 rounded-lg shrink-0">
+        <i data-lucide="bird" class="w-4 h-4"></i>
+      </div>
+      <div>
+        <span id="coopStatusText" class="font-semibold text-amber-200">Nightly Coop Lockup:</span>
+        <span id="sunsetCountdown" class="text-slate-300 ml-1">Sunset in ~1 hr 20m</span>
+      </div>
+    </div>
+    <button id="toggleCoopBtn" onclick="toggleCoopLock()" class="px-3 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg transition active:scale-95 shadow-sm text-xs">
+      Lock Coop
+    </button>
+  </div>
+
+  <!-- Main Content Area -->
+  <main class="flex-1 relative overflow-hidden bg-slate-950">
+    
+    <!-- TAB 1: INTERACTIVE MAP & ZONES -->
+    <div id="tab-map" class="tab-content absolute inset-0 flex flex-col z-10">
+      <!-- Floating Map Control Overlay -->
+      <div class="absolute top-3 left-3 right-3 z-[400] flex items-center justify-between pointer-events-none">
+        <div class="bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl p-2 shadow-xl pointer-events-auto flex items-center space-x-2 text-xs">
+          <span class="text-slate-400 font-medium px-1">Active Map:</span>
+          <span id="totalMappedArea" class="font-bold text-emerald-400">0 m²</span>
+        </div>
+        <button onclick="openAddZoneModal()" class="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-semibold px-3 py-2 rounded-xl shadow-lg pointer-events-auto flex items-center space-x-1.5 text-xs transition">
+          <i data-lucide="plus-circle" class="w-4 h-4"></i>
+          <span>Draw Zone</span>
+        </button>
+      </div>
+
+      <!-- Map Element -->
+      <div id="map" class="w-full h-full"></div>
+
+      <!-- Selected Zone Bottom Sheet Popup -->
+      <div id="zoneBottomSheet" class="absolute bottom-4 left-4 right-4 z-[400] bg-slate-900/95 backdrop-blur-md border border-slate-800 rounded-2xl p-4 shadow-2xl transition-all duration-300 transform translate-y-full opacity-0 pointer-events-none">
+        <div class="flex items-start justify-between">
+          <div>
+            <div class="flex items-center space-x-2">
+              <span id="sheetZoneBadge" class="w-3 h-3 rounded-full bg-emerald-400"></span>
+              <h3 id="sheetZoneTitle" class="font-bold text-slate-100 text-base">Zone Title</h3>
+            </div>
+            <p id="sheetZoneCategory" class="text-xs text-slate-400 mt-0.5">Category</p>
+          </div>
+          <button onclick="closeZoneBottomSheet()" class="p-1 text-slate-400 hover:text-slate-200">
+            <i data-lucide="x" class="w-5 h-5"></i>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 my-3 text-xs">
+          <div class="bg-slate-800/60 border border-slate-700/50 p-2.5 rounded-xl">
+            <span class="text-slate-400">Total Area</span>
+            <div id="sheetZoneArea" class="font-bold text-emerald-400 text-sm mt-0.5">0 m²</div>
+          </div>
+          <div class="bg-slate-800/60 border border-slate-700/50 p-2.5 rounded-xl">
+            <span class="text-slate-400">Perimeter</span>
+            <div id="sheetZonePerimeter" class="font-bold text-slate-200 text-sm mt-0.5">0 m</div>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-2">
+          <button onclick="calcForSelectedZone()" class="flex-1 bg-sky-500/10 border border-sky-500/30 text-sky-400 hover:bg-sky-500/20 py-2 rounded-xl text-xs font-semibold flex items-center justify-center space-x-1.5 transition">
+            <i data-lucide="flask-conical" class="w-4 h-4"></i>
+            <span>Calculate Spray</span>
+          </button>
+          <button onclick="deleteSelectedZone()" class="p-2 bg-rose-500/10 border border-rose-500/30 text-rose-400 hover:bg-rose-500/20 rounded-xl transition">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: SPRAY & CHEMICAL CALCULATOR -->
+    <div id="tab-calc" class="tab-content absolute inset-0 hidden overflow-y-auto p-4 space-y-4 no-scrollbar">
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-4">
+        <div class="flex items-center space-x-2.5 text-sky-400">
+          <i data-lucide="flask-conical" class="w-5 h-5"></i>
+          <h2 class="font-bold text-base text-slate-100">Tank-Mix Spray Calculator</h2>
+        </div>
+        <p class="text-xs text-slate-400 leading-relaxed">Calculate exact herbicide, fungicide, or liquid fertilizer quantities based on your measured zone area.</p>
+
+        <!-- Zone Selector -->
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1.5">1. Select Target Zone</label>
+          <select id="calcZoneSelect" onchange="updateCalcFromSelect()" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-sky-500">
+            <option value="">-- Choose Mapped Zone --</option>
+          </select>
+        </div>
+
+        <!-- Manual Area Override -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1.5">Target Area (m²)</label>
+            <input type="number" id="calcAreaInput" placeholder="350" oninput="runSprayCalculation()" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-sky-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1.5">Carrier Water (L / 100m²)</label>
+            <input type="number" id="calcWaterRateInput" value="5" oninput="runSprayCalculation()" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-sky-500">
+          </div>
+        </div>
+
+        <!-- Application Label Rate -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1.5">Label Rate Amount</label>
+            <input type="number" id="calcRateInput" placeholder="50" oninput="runSprayCalculation()" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-sky-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1.5">Rate Unit</label>
+            <select id="calcUnitSelect" onchange="runSprayCalculation()" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-sky-500">
+              <option value="mL/100m²">mL per 100 m²</option>
+              <option value="g/100m²">grams per 100 m²</option>
+              <option value="mL/L">mL per Litre Water</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Preset Quick Load -->
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1.5">Common Australian Presets</label>
+          <div class="flex flex-wrap gap-1.5">
+            <button onclick="applyCalcPreset(50, 'mL/100m²', 5)" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-slate-300 rounded-lg text-xs">Bow & Arrow (50mL/100m²)</button>
+            <button onclick="applyCalcPreset(15, 'mL/100m²', 4)" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-slate-300 rounded-lg text-xs">Sempra Weed (1.3g/100m²)</button>
+            <button onclick="applyCalcPreset(100, 'mL/100m²', 5)" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-slate-300 rounded-lg text-xs">Liquid Iron (100mL/100m²)</button>
+          </div>
+        </div>
+
+        <!-- Result Box -->
+        <div class="bg-gradient-to-br from-sky-950/60 to-slate-950 border border-sky-500/30 rounded-xl p-4 space-y-3">
+          <div class="flex items-center justify-between border-b border-sky-500/20 pb-2">
+            <span class="text-xs font-medium text-sky-300">Calculated Tank Batch</span>
+            <span class="text-[10px] text-slate-400">Check bottle label before application</span>
+          </div>
+          
+          <div class="grid grid-cols-2 gap-3 text-center">
+            <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+              <span class="text-[11px] text-slate-400 block">Product Concentrate</span>
+              <span id="resultProduct" class="text-xl font-extrabold text-sky-400 mt-0.5 block">0 mL</span>
+            </div>
+            <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+              <span class="text-[11px] text-slate-400 block">Total Water Carrier</span>
+              <span id="resultWater" class="text-xl font-extrabold text-emerald-400 mt-0.5 block">0 L</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: TASKS & MAINTENANCE -->
+    <div id="tab-tasks" class="tab-content absolute inset-0 hidden overflow-y-auto p-4 space-y-4 no-scrollbar">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="font-bold text-lg text-slate-100">Homestead Tasks</h2>
+          <p class="text-xs text-slate-400">Scheduled maintenance & yard work</p>
+        </div>
+        <button onclick="openAddTaskModal()" class="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-semibold px-3 py-2 rounded-xl shadow-md text-xs flex items-center space-x-1 transition">
+          <i data-lucide="plus" class="w-4 h-4"></i>
+          <span>Add Task</span>
+        </button>
+      </div>
+
+      <!-- Filter Category Tabs -->
+      <div class="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1">
+        <button onclick="filterTasks('All')" class="task-filter-btn px-3 py-1.5 bg-emerald-500 text-slate-950 font-semibold rounded-xl text-xs shrink-0">All</button>
+        <button onclick="filterTasks('Lawns')" class="task-filter-btn px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-xs shrink-0">Lawns</button>
+        <button onclick="filterTasks('Gardens')" class="task-filter-btn px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-xs shrink-0">Gardens</button>
+        <button onclick="filterTasks('House')" class="task-filter-btn px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-xs shrink-0">House</button>
+        <button onclick="filterTasks('Equipment')" class="task-filter-btn px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 rounded-xl text-xs shrink-0">Equipment</button>
+      </div>
+
+      <!-- Task List Container -->
+      <div id="taskList" class="space-y-2.5">
+        <!-- Rendered Dynamically -->
+      </div>
+    </div>
+
+    <!-- TAB 4: CHOOK SHED & POULTRY -->
+    <div id="tab-chooks" class="tab-content absolute inset-0 hidden overflow-y-auto p-4 space-y-4 no-scrollbar">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <div class="p-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl">
+            <i data-lucide="bird" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="font-bold text-base text-slate-100">Chook Shed & Poultry</h2>
+            <p class="text-xs text-slate-400">Flock health & daily egg yield</p>
+          </div>
+        </div>
+        <button onclick="logTodayEggs()" class="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1 transition shadow">
+          <i data-lucide="egg" class="w-4 h-4"></i>
+          <span>+ Log Eggs</span>
+        </button>
+      </div>
+
+      <!-- Egg Production Card & Chart -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-xs text-slate-400">Today's Harvest</span>
+            <div class="text-2xl font-black text-amber-400 mt-0.5 flex items-baseline space-x-1">
+              <span id="todayEggCount">0</span>
+              <span class="text-xs font-normal text-slate-400">eggs</span>
+            </div>
+          </div>
+          <div class="text-right">
+            <span class="text-xs text-slate-400">7-Day Total</span>
+            <div id="weeklyEggCount" class="text-xl font-bold text-slate-200 mt-0.5">0</div>
+          </div>
+        </div>
+        <!-- Weekly Graph -->
+        <div class="h-36 w-full pt-2">
+          <canvas id="eggChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Feed & Water Levels Monitor -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
+        <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Feed & Water Levels</h3>
+        
+        <!-- Feed Bar -->
+        <div class="space-y-1.5">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-400">Layer Pellet Feeder</span>
+            <span id="feedPctText" class="font-semibold text-amber-400">75%</span>
+          </div>
+          <div class="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800 p-0.5">
+            <div id="feedBar" class="bg-amber-500 h-full rounded-full transition-all duration-500" style="width: 75%"></div>
+          </div>
+          <div class="flex justify-end space-x-2 pt-1">
+            <button onclick="updateSupplyLevel('feed', -25)" class="text-[10px] bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded text-slate-300">-25%</button>
+            <button onclick="updateSupplyLevel('feed', 25)" class="text-[10px] bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 px-2 py-0.5 rounded">+ Refill</button>
+          </div>
+        </div>
+
+        <!-- Water Bar -->
+        <div class="space-y-1.5 pt-1">
+          <div class="flex justify-between text-xs">
+            <span class="text-slate-400">Drink Drinker / Waterer</span>
+            <span id="waterPctText" class="font-semibold text-sky-400">90%</span>
+          </div>
+          <div class="w-full bg-slate-950 h-3 rounded-full overflow-hidden border border-slate-800 p-0.5">
+            <div id="waterBar" class="bg-sky-500 h-full rounded-full transition-all duration-500" style="width: 90%"></div>
+          </div>
+          <div class="flex justify-end space-x-2 pt-1">
+            <button onclick="updateSupplyLevel('water', -25)" class="text-[10px] bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded text-slate-300">-25%</button>
+            <button onclick="updateSupplyLevel('water', 25)" class="text-[10px] bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 px-2 py-0.5 rounded">+ Refill</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Worming & Health Tracker -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Flock Health & Worming</h3>
+          <button onclick="logWormingDate()" class="text-[11px] text-amber-400 hover:underline">+ Log Treatment</button>
+        </div>
+        <div class="bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
+          <div>
+            <span class="text-slate-400 block">Last Wormed</span>
+            <span id="lastWormedText" class="font-semibold text-slate-200 mt-0.5 block">14 days ago</span>
+          </div>
+          <div class="text-right">
+            <span class="text-slate-400 block">Next Due</span>
+            <span id="nextWormedText" class="font-semibold text-emerald-400 mt-0.5 block">In 76 days</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 5: EQUIPMENT & ASSETS -->
+    <div id="tab-equipment" class="tab-content absolute inset-0 hidden overflow-y-auto p-4 space-y-4 no-scrollbar">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="font-bold text-lg text-slate-100">Equipment & Machinery</h2>
+          <p class="text-xs text-slate-400">Service logs, engine hours & blade swaps</p>
+        </div>
+        <button onclick="openAddEquipmentModal()" class="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-slate-950 font-semibold px-3 py-2 rounded-xl shadow text-xs flex items-center space-x-1 transition">
+          <i data-lucide="wrench" class="w-4 h-4"></i>
+          <span>+ Add Tool</span>
+        </button>
+      </div>
+
+      <!-- Equipment List Container -->
+      <div id="equipm
